@@ -5,6 +5,10 @@ import { UnitModel } from '../../units/models/unit.model';
 import { PropertyModel } from '../../properties/models/propertyModel';
 import { Membership } from '../../orgs/models/membership.model';
 import { TenantInviteModel } from '../../invites/models/tenantInvite.model';
+import {
+  buildAcceptInviteUrl,
+  ensureTenantUserForInvite
+} from '../../invites/services/tenantInvite.service';
 import { sendTenantOnboardingInviteEmail } from '../../onboarding/services/tenant-invite-notifier.service';
 import { AppError } from '../../../core/errors/AppError';
 import { resolveLandlordOrgId } from './landlordDashboard.service';
@@ -77,17 +81,14 @@ export async function inviteTenant(
   if (existing) throw new AppError('Unit already has an active or pending tenant', 409);
 
   const User = mongoose.model('User');
-  let tenantUser = await User.findOne({ email: body.email.toLowerCase().trim() }).lean();
-  let isNewTenantUser = false;
-  if (!tenantUser) {
-    tenantUser = await User.create({
-      email: body.email.toLowerCase().trim(),
-      role: 'TENANT',
-      status: 'ACTIVE',
-      profile: { firstName: '', lastName: '' },
-    });
-    isNewTenantUser = true;
-  }
+  const tenantEmail = body.email.toLowerCase().trim();
+
+  // Reserve the account through the invites service so it is created passwordless
+  // and PENDING — it only becomes usable once the tenant accepts at
+  // /accept-invite, proves the inbox with a code and sets their own password.
+  const { createdNewUser: isNewTenantUser } = await ensureTenantUserForInvite(tenantEmail);
+  const tenantUser = await User.findOne({ email: tenantEmail }).lean();
+  if (!tenantUser) throw new AppError('Failed to provision tenant account', 500);
 
   const tenantUserId = (tenantUser as any)._id;
   const tenancy = await TenancyModel.create({
@@ -104,8 +105,9 @@ export async function inviteTenant(
   const unit = await UnitModel.findById(body.unitId).lean();
   const property = unit ? await PropertyModel.findById((unit as any).propertyId).lean() : null;
   const inviteToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await TenantInviteModel.create({
-    tenantEmail: body.email.toLowerCase().trim(),
+    tenantEmail,
     propertyId: (unit as any)?.propertyId,
     unitId: new mongoose.Types.ObjectId(body.unitId),
     participationModel: 'RPA_ONLY',
@@ -114,12 +116,27 @@ export async function inviteTenant(
     requiredAgreements: ['RPA'],
     inviteToken,
     status: 'SENT',
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    expiresAt,
     leaseStartDate: new Date(body.leaseStart),
     leaseEndDate: new Date(body.leaseEnd),
   });
 
-  const inviteUrl = `${process.env.FRONTEND_URL ?? 'https://keypath.ai'}/accept-invite?token=${inviteToken}`;
+  const inviteUrl = buildAcceptInviteUrl(inviteToken);
+
+  // Email the tenant directly rather than relying on the landlord to relay the
+  // link by hand; the returned URL stays available as a manual fallback.
+  let emailSent = false;
+  try {
+    const { messageId } = await sendTenantOnboardingInviteEmail({
+      toEmail: tenantEmail,
+      firstName: (tenantUser as any)?.profile?.firstName || 'there',
+      onboardingUrl: inviteUrl,
+      expiresAtIso: expiresAt.toISOString()
+    });
+    emailSent = messageId !== 'not-sent';
+  } catch (err) {
+    console.error('[landlord] tenant invite email failed:', err);
+  }
 
   if (isNewTenantUser) {
     notify({
@@ -139,7 +156,8 @@ export async function inviteTenant(
     tenancyId: tenancy._id.toString(),
     tenantUserId: tenantUserId.toString(),
     email: body.email,
-    inviteUrl
+    inviteUrl,
+    emailSent
   };
 }
 
@@ -285,7 +303,7 @@ export async function resendTenantInvite(
     });
   }
 
-  const inviteUrl = `${process.env.FRONTEND_URL ?? 'https://keypath.ai'}/accept-invite?token=${inviteToken}`;
+  const inviteUrl = buildAcceptInviteUrl(inviteToken);
 
   try {
     await sendTenantOnboardingInviteEmail({

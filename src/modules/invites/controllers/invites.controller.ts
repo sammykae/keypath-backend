@@ -5,7 +5,8 @@ import { successResponse, errorResponse } from '../../../core/utils/response';
 import {
   createInvite,
   verifyInvite,
-  acceptInviteByToken,
+  sendInviteOtp,
+  verifyInviteOtp,
   resendInvite,
 } from '../services/tenantInvite.service';
 
@@ -62,28 +63,62 @@ export async function previewInviteHandler(req: Request, res: Response): Promise
   }
 }
 
-// POST /api/invites/accept — confirm the magic link token, accept invite, return auth JWT
-export async function confirmAcceptInviteHandler(req: Request, res: Response): Promise<void> {
+/**
+ * The OTP services signal every terminal state with a machine-readable AppError
+ * message so the accept screen can render the right explanation. Those codes are
+ * passed through verbatim; only the three invite-lifecycle states get the
+ * friendlier INVITE_* treatment shared with the preview endpoint.
+ */
+function respondWithOtpError(res: Response, err: unknown, context: string): void {
+  if (err instanceof AppError) {
+    const raw = err.message;
+    if (raw === 'expired_token' || raw === 'already_accepted' || raw === 'invalid_token') {
+      const { code, status, resendInviteCta } = inviteErrorMeta(raw);
+      errorResponse(res, status, code, friendlyInviteError(raw), {
+        resendInviteCta,
+        ...(resendInviteCta ? { resendUrl: '/api/invites/resend' } : {}),
+      });
+      return;
+    }
+    errorResponse(res, err.statusCode, raw, raw);
+    return;
+  }
+  console.error(`${context} error:`, err);
+  errorResponse(res, 500, 'INTERNAL_ERROR', 'Internal server error');
+}
+
+// POST /api/invites/send-otp — email a 6-digit code to the invited tenant
+export async function sendInviteOtpHandler(req: Request, res: Response): Promise<void> {
   try {
     const { token } = req.body;
     if (!token) {
       errorResponse(res, 400, 'MISSING_TOKEN', 'token is required');
       return;
     }
-
-    const result = await acceptInviteByToken(String(token));
+    const result = await sendInviteOtp(String(token));
     successResponse(res, result);
-  } catch (err: any) {
-    if (err instanceof AppError) {
-      const { code, status, resendInviteCta } = inviteErrorMeta(err.message);
-      errorResponse(res, status, code, friendlyInviteError(err.message), {
-        resendInviteCta,
-        ...(resendInviteCta ? { resendUrl: '/api/invites/resend' } : {}),
-      });
+  } catch (err) {
+    respondWithOtpError(res, err, 'sendInviteOtpHandler');
+  }
+}
+
+// POST /api/invites/verify-otp — accept the invite, set the password on first
+// acceptance, and return a session so the tenant lands on their dashboard.
+export async function verifyInviteOtpHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { token, otp, password } = req.body;
+    if (!token || !otp) {
+      errorResponse(res, 400, 'MISSING_PARAMS', 'token and otp are required');
       return;
     }
-    console.error('confirmAcceptInviteHandler error:', err);
-    errorResponse(res, 500, 'INTERNAL_ERROR', 'Internal server error');
+    const result = await verifyInviteOtp(
+      String(token),
+      String(otp),
+      typeof password === 'string' ? password : undefined
+    );
+    successResponse(res, result);
+  } catch (err) {
+    respondWithOtpError(res, err, 'verifyInviteOtpHandler');
   }
 }
 

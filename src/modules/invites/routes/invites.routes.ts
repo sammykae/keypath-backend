@@ -4,8 +4,9 @@ import { requireRole } from "../../../middleware/rbac.middleware";
 
 import {
   previewInviteHandler,
-  confirmAcceptInviteHandler,
   verifyInviteHandler,
+  sendInviteOtpHandler,
+  verifyInviteOtpHandler,
   resendInviteHandler,
   createInviteHandler,
 } from "../controllers/invites.controller";
@@ -35,9 +36,19 @@ router.get("/accept", previewInviteHandler);
 
 /**
  * @swagger
- * /api/invites/accept:
+ * /api/invites/verify:
+ *   get:
+ *     summary: Alias for GET /accept — kept for backwards compatibility
+ *     tags: [Invites]
+ */
+router.get("/verify", verifyInviteHandler);
+
+/**
+ * @swagger
+ * /api/invites/send-otp:
  *   post:
- *     summary: Confirm acceptance via magic link — returns auth JWT
+ *     summary: Email a 6-digit acceptance code to the invited tenant
+ *     description: Public — the invite token is the credential. Rate limited to one send per 60 seconds.
  *     tags: [Invites]
  *     requestBody:
  *       required: true
@@ -47,25 +58,45 @@ router.get("/accept", previewInviteHandler);
  *             type: object
  *             required: [token]
  *             properties:
- *               token: { type: string, description: "Magic link token from invite email" }
+ *               token: { type: string }
  *     responses:
  *       200:
- *         description: Accepted — returns authToken, dashboardRoute, and user
+ *         description: Code sent
  *       400:
- *         description: INVITE_EXPIRED or INVITE_INVALID
- *       409:
- *         description: INVITE_ALREADY_ACCEPTED
+ *         description: invalid_token / expired_token / already_accepted
+ *       429:
+ *         description: otp_rate_limit
  */
-router.post("/accept", confirmAcceptInviteHandler);
+router.post("/send-otp", sendInviteOtpHandler);
 
 /**
  * @swagger
- * /api/invites/verify:
- *   get:
- *     summary: Alias for GET /accept — kept for backwards compatibility
+ * /api/invites/verify-otp:
+ *   post:
+ *     summary: Accept the invite with the emailed code and return a session
+ *     description: >
+ *       Public — verifying the code accepts the invite, activates the tenancy and
+ *       signs the tenant in. When the invited account has no password yet, one is
+ *       required here and set as part of acceptance.
  *     tags: [Invites]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, otp]
+ *             properties:
+ *               token: { type: string }
+ *               otp: { type: string, example: "123456" }
+ *               password: { type: string, minLength: 8, description: "Required when the account has no password yet" }
+ *     responses:
+ *       200:
+ *         description: Invite accepted, authToken and user returned
+ *       400:
+ *         description: invalid_otp / otp_expired / otp_not_sent / password_required / invalid_token / expired_token
  */
-router.get("/verify", verifyInviteHandler);
+router.post("/verify-otp", verifyInviteOtpHandler);
 
 /**
  * @swagger

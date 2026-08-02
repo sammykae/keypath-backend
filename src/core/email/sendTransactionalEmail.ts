@@ -57,50 +57,35 @@ export function buildKeypathTenantInviteEmailHtml(opts: {
   unitNumber: string;
   leaseSummary: string;
   expiresDisplay: string;
-  signInUrl: string;
+  /** Deep link to /accept-invite?token= — the only way to complete this invite. */
+  acceptUrl: string;
   tenantEmail: string;
-  /** When set, new account: show temp password. When omitted, existing account: email only + security note (password is never emailed). */
-  temporaryPassword?: string;
 }): string {
   const {
     propertyName,
     unitNumber,
     leaseSummary,
     expiresDisplay,
-    signInUrl,
+    acceptUrl,
     tenantEmail,
-    temporaryPassword,
   } = opts;
 
   const e = escapeHtml;
-  const safeUrl = signInUrl.replace(/"/g, "%22");
+  const safeUrl = acceptUrl.replace(/"/g, "%22");
 
-  const credentialBlock = temporaryPassword
-    ? `
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:20px 0;border-radius:10px;background:#f0fdfa;border:1px solid #99f6e4;overflow:hidden;">
-        <tr>
-          <td style="padding:18px 20px;font-family:${emailSans};font-size:14px;color:#134e4a;line-height:1.6;">
-            <div style="font-weight:600;margin-bottom:12px;color:#0f766e;">Your sign-in details</div>
-            <div style="margin-bottom:6px;"><span style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;">Email</span><br/>
-            <span style="font-size:15px;color:#0f172a;word-break:break-all;">${e(tenantEmail)}</span></div>
-            <div style="margin-top:12px;"><span style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;">Temporary password</span><br/>
-            <code style="display:inline-block;margin-top:4px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid #cbd5e1;font-size:14px;color:#0f172a;letter-spacing:0.02em;">${e(temporaryPassword)}</code></div>
-            <p style="margin:14px 0 0;font-size:13px;color:#475569;">After you sign in, change your password if the app lets you.</p>
-          </td>
-        </tr>
-      </table>`
-    : `
+  // Credentials are never emailed: the link is the credential, and the tenant
+  // proves ownership of the inbox with a one-time code before choosing a password.
+  const credentialBlock = `
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:20px 0;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;overflow:hidden;">
         <tr>
           <td style="padding:18px 20px;font-family:${emailSans};font-size:14px;color:#334155;line-height:1.65;">
-            <div style="font-weight:600;margin-bottom:10px;color:#0f172a;">Sign in with your existing KeyPath account</div>
+            <div style="font-weight:600;margin-bottom:10px;color:#0f172a;">How to get in</div>
             <div style="margin-bottom:10px;"><span style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;">Your email</span><br/>
             <span style="font-size:15px;color:#0f172a;font-weight:600;word-break:break-all;">${e(tenantEmail)}</span></div>
             <p style="margin:0;font-size:13px;color:#64748b;">
-              <strong style="color:#475569;">Password</strong> — For security we never send your password by email.
-              Use the password you already use for KeyPath. If you forgot it, use <strong>Forgot password</strong> on the sign-in page.
+              Open the link below and we will email you a 6-digit code. Enter it, choose a password,
+              and your dashboard is ready — no password is ever sent by email.
             </p>
-            <p style="margin:12px 0 0;font-size:13px;color:#334155;">After you sign in, this invitation will complete automatically.</p>
           </td>
         </tr>
       </table>`;
@@ -142,11 +127,11 @@ export function buildKeypathTenantInviteEmailHtml(opts: {
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:28px 0 8px;">
               <tr>
                 <td align="center">
-                  <a href="${safeUrl}" style="display:inline-block;padding:14px 28px;background:#0f766e;color:#ffffff!important;text-decoration:none;font-family:${emailSans};font-size:15px;font-weight:600;border-radius:10px;box-shadow:0 2px 8px rgba(15,118,110,0.35);">Sign in to KeyPath</a>
+                  <a href="${safeUrl}" style="display:inline-block;padding:14px 28px;background:#0f766e;color:#ffffff!important;text-decoration:none;font-family:${emailSans};font-size:15px;font-weight:600;border-radius:10px;box-shadow:0 2px 8px rgba(15,118,110,0.35);">Accept your invitation</a>
                 </td>
               </tr>
             </table>
-            <p style="margin:16px 0 0;font-size:13px;color:#64748b;text-align:center;font-family:${emailSans};">Or open the KeyPath app and sign in with the same email.</p>
+            <p style="margin:16px 0 0;font-size:13px;color:#64748b;text-align:center;font-family:${emailSans};word-break:break-all;">Or paste this link into your browser:<br/>${e(acceptUrl)}</p>
             <p style="margin:24px 0 0;padding:14px 16px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;font-size:13px;color:#64748b;font-family:${emailSans};line-height:1.55;">
               <strong style="color:#475569;">Invitation expires</strong><br/>${e(expiresDisplay)}
             </p>

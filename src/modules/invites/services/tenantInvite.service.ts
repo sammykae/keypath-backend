@@ -24,6 +24,15 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * The single completion entry point for every tenant invite, regardless of which
+ * service created it. Anything that emails or hands out an invite must use this
+ * so there is exactly one screen that can accept an invite.
+ */
+export function buildAcceptInviteUrl(inviteToken: string): string {
+  return `${getTenantInviteBaseUrl()}/accept-invite?token=${inviteToken}`;
+}
+
 /** Avoid showing placeholder DB values like literal "string"; prefer label when unitNumber is junk. */
 function formatUnitLabelForEmail(unit: { unitNumber?: unknown; label?: unknown } | null): string {
   if (!unit) return "";
@@ -65,26 +74,31 @@ function computeRequiredAgreements(participationModel: CreateTenantInviteDTO["pa
   }
 }
 
-/** Create TENANT user with random password if none exists; invite acceptance happens on first login. */
-export async function provisionTenantUserForInviteEmail(
+/**
+ * Reserve the TENANT user the invite will activate.
+ *
+ * The account is created without a password and left PENDING: the tenant proves
+ * they own the inbox with a one-time code and chooses their own password in
+ * `verifyInviteOtp`. Nothing here is a usable credential, so an unaccepted
+ * invite can never be signed into.
+ */
+export async function ensureTenantUserForInvite(
   email: string
-): Promise<{ createdNewUser: boolean; temporaryPassword?: string }> {
+): Promise<{ createdNewUser: boolean }> {
   const normalized = normalizeEmail(email);
   const existing = await User.findOne({ email: normalized }).lean();
   if (existing) {
     return { createdNewUser: false };
   }
-  const temporaryPassword = crypto.randomBytes(18).toString("base64url").slice(0, 20);
-  const passwordHash = await bcrypt.hash(temporaryPassword, 12);
   await User.create({
     email: normalized,
-    passwordHash,
+    passwordHash: null,
     role: "TENANT",
-    status: "ACTIVE",
+    status: "PENDING",
     oauthProviders: [],
     profile: {},
   });
-  return { createdNewUser: true, temporaryPassword };
+  return { createdNewUser: true };
 }
 
 /** Mark pending (SENT, not expired) invites for this email as ACCEPTED — call after successful login/register. */
@@ -202,10 +216,10 @@ export async function createInvite(data: CreateTenantInviteDTO, actor?: { _id?: 
   );
 
   let emailSent = false;
-  let provision: { createdNewUser: boolean; temporaryPassword?: string } | null = null;
+  const acceptUrl = buildAcceptInviteUrl(inviteToken);
 
   if (parsed.deliveryMethod === "KEYPATH_EMAIL") {
-    provision = await provisionTenantUserForInviteEmail(tenantEmail);
+    await ensureTenantUserForInvite(tenantEmail);
     if (isEmailReady()) {
       try {
         const leaseSummary =
@@ -213,7 +227,6 @@ export async function createInvite(data: CreateTenantInviteDTO, actor?: { _id?: 
             ? `${parsed.leaseStartDate ? parsed.leaseStartDate.toISOString().slice(0, 10) : "?"} → ${parsed.leaseEndDate ? parsed.leaseEndDate.toISOString().slice(0, 10) : "?"}`
             : "";
 
-        const signInUrl = getTenantInviteBaseUrl();
         const expiresDisplay = expiresAt.toLocaleString("en-US", {
           weekday: "long",
           year: "numeric",
@@ -224,32 +237,16 @@ export async function createInvite(data: CreateTenantInviteDTO, actor?: { _id?: 
           timeZoneName: "short",
         });
 
-        const loginLines =
-          provision.createdNewUser && provision.temporaryPassword
-            ? [
-                `Your KeyPath sign-in (after you log in, this invitation is accepted automatically):`,
-                ``,
-                `Email: ${tenantEmail}`,
-                `Temporary password: ${provision.temporaryPassword}`,
-                ``,
-                `Open ${signInUrl} or the KeyPath app to sign in. Change your password after first login if the app allows it.`,
-                ``,
-              ]
-            : [
-                `You already have a KeyPath account.`,
-                ``,
-                `Email (sign in with this address): ${tenantEmail}`,
-                ``,
-                `We cannot send your existing password by email for security. Use your KeyPath password, or use Forgot password on the sign-in page.`,
-                ``,
-                `Then open ${signInUrl} or the KeyPath app — your invitation will be accepted automatically.`,
-                ``,
-              ];
-
         const textBody = [
           `Hello,`,
           ``,
-          ...loginLines,
+          `You've been invited to join ${propertyName} on KeyPath.`,
+          ``,
+          `Open this link to accept:`,
+          acceptUrl,
+          ``,
+          `We'll email you a 6-digit code to confirm it's you, then you choose your own password.`,
+          ``,
           `Property: ${propertyName}`,
           unitNumber ? `Unit: ${unitNumber}` : "",
           leaseSummary ? `Lease: ${leaseSummary}` : "",
@@ -270,9 +267,8 @@ export async function createInvite(data: CreateTenantInviteDTO, actor?: { _id?: 
             unitNumber,
             leaseSummary,
             expiresDisplay,
-            signInUrl,
+            acceptUrl,
             tenantEmail,
-            temporaryPassword: provision.temporaryPassword,
           }),
         });
         emailSent = true;
@@ -282,24 +278,19 @@ export async function createInvite(data: CreateTenantInviteDTO, actor?: { _id?: 
     }
   }
 
-  // KEYPATH_EMAIL + email delivered: tenant gets credentials in email — do not return token/code to landlord.
+  // The tenant got their own link by email — don't hand the landlord a second
+  // copy of the credential they have no need to see.
   if (parsed.deliveryMethod === "KEYPATH_EMAIL" && emailSent) {
-    return {
-      inviteId: invite._id,
-      emailSent,
-      acceptance: "LOGIN" as const,
-      ...(provision?.createdNewUser ? { accountCreated: true as const } : { accountCreated: false as const }),
-    };
+    return { inviteId: invite._id, emailSent, acceptance: "OTP" as const };
   }
 
   return {
     inviteId: invite._id,
     inviteToken,
     inviteCode: invite.inviteCode,
+    inviteUrl: acceptUrl,
     emailSent,
-    ...(parsed.deliveryMethod === "KEYPATH_EMAIL" && provision
-      ? { acceptance: "LOGIN" as const, accountCreated: provision.createdNewUser }
-      : {}),
+    acceptance: "OTP" as const,
   };
 }
 
@@ -333,9 +324,10 @@ export async function verifyInvite(tokenInput: VerifyInviteQueryDTO) {
     return { ok: false as const, error: "already_accepted" };
   }
 
-  const [property, unit] = await Promise.all([
+  const [property, unit, inviteeUser] = await Promise.all([
     PropertyModel.findById(invite.propertyId).lean().exec(),
     UnitModel.findById(invite.unitId).lean().exec(),
+    User.findOne({ email: invite.tenantEmail.toLowerCase() }).select("passwordHash").lean().exec(),
   ]);
 
   const propertyName = property?.name ?? "";
@@ -343,71 +335,20 @@ export async function verifyInvite(tokenInput: VerifyInviteQueryDTO) {
 
   return {
     ok: true as const,
-    requiresOtp: false as const,
+    // Owning the invite link is not proof of owning the inbox, so acceptance
+    // always goes through a one-time code — same contract as the PM flow.
+    requiresOtp: true as const,
     requiresLoginToAccept: false as const,
+    // Invitees who were provisioned by a landlord have no password yet; the
+    // accept screen collects one alongside the code so they end up with a
+    // durable credential rather than a link-only account.
+    hasPassword: Boolean((inviteeUser as { passwordHash?: string | null } | null)?.passwordHash),
     summary: {
       email: invite.tenantEmail,
       propertyName,
       unit: unitNumber,
       leaseStart: invite.leaseStartDate ? invite.leaseStartDate.toISOString().slice(0, 10) : "",
       leaseEnd: invite.leaseEndDate ? invite.leaseEndDate.toISOString().slice(0, 10) : "",
-    },
-  };
-}
-
-// Accept an invite directly via magic link token — no OTP required.
-export async function acceptInviteByToken(
-  token: string
-): Promise<{ ok: true; authToken: string; dashboardRoute: string; user: object }> {
-  const invite = await TenantInviteModel.findOne({ inviteToken: token }).exec();
-  if (!invite) throw new AppError("invalid_token", 400);
-  if (invite.status === "CANCELLED") throw new AppError("invalid_token", 400);
-  if (invite.status === "ACCEPTED") throw new AppError("already_accepted", 409);
-  if (invite.expiresAt <= new Date()) throw new AppError("expired_token", 400);
-
-  const userDoc = await User.findOne({ email: invite.tenantEmail.toLowerCase() }).lean().exec();
-  if (!userDoc) throw new AppError("user_not_found", 404);
-
-  if ((userDoc as any).role !== "TENANT") {
-    await User.findByIdAndUpdate((userDoc as any)._id, { $set: { role: "TENANT" } });
-  }
-  const user: any = { ...(userDoc as any), role: "TENANT" };
-
-  await TenantInviteModel.findByIdAndUpdate(invite._id, {
-    $set: { status: "ACCEPTED", acceptedAt: new Date() },
-  });
-
-  const activatedTenancy = await TenancyModel.findOneAndUpdate(
-    { tenantUserId: (user as any)._id, unitId: invite.unitId, status: "PENDING" },
-    { $set: { status: "ACTIVE" } },
-    { new: true }
-  );
-  if (!activatedTenancy) {
-    const fallback = await TenancyModel.findOneAndUpdate(
-      { unitId: invite.unitId, status: "PENDING" },
-      { $set: { status: "ACTIVE", tenantUserId: (user as any)._id } },
-      { new: true }
-    );
-    if (fallback) {
-      await UnitModel.findByIdAndUpdate(fallback.unitId, { $set: { status: "OCCUPIED" } });
-    }
-  } else {
-    await UnitModel.findByIdAndUpdate(activatedTenancy.unitId, { $set: { status: "OCCUPIED" } });
-  }
-
-  const authToken = generateJwt(user);
-
-  return {
-    ok: true,
-    authToken,
-    dashboardRoute: "/tenant",
-    user: {
-      id: (user as any)._id.toString(),
-      email: user.email,
-      role: "TENANT",
-      status: ((user as any).status ?? "ACTIVE").toUpperCase(),
-      phone: user.phone,
-      profile: user.profile ?? {},
     },
   };
 }
@@ -455,7 +396,8 @@ export async function sendInviteOtp(token: string): Promise<{ ok: true; email: s
 
 export async function verifyInviteOtp(
   token: string,
-  otp: string
+  otp: string,
+  password?: string
 ): Promise<{ ok: true; authToken: string; user: object }> {
   const invite = await TenantInviteModel.findOne({ inviteToken: token }).exec();
   if (!invite) throw new AppError("invalid_token", 400);
@@ -467,15 +409,29 @@ export async function verifyInviteOtp(
   const valid = await bcrypt.compare(otp, invite.otpHash);
   if (!valid) throw new AppError("invalid_otp", 400);
 
-  // Find the tenant user (created by landlord invite flow)
+  // Find the tenant user (reserved when the invite was created)
   const userDoc = await User.findOne({ email: invite.tenantEmail.toLowerCase() }).lean().exec();
   if (!userDoc) throw new AppError("user_not_found", 404);
 
-  // Ensure the user has TENANT role — accepting an invite grants tenant access
-  if ((userDoc as any).role !== "TENANT") {
-    await User.findByIdAndUpdate((userDoc as any)._id, { $set: { role: "TENANT" } });
+  // A landlord-provisioned invitee has no password yet. The correct code proves
+  // they own the inbox, so this is the one moment we can safely let them set one
+  // — and we require it, so nobody ends up with a link-only account.
+  const needsPassword = !(userDoc as any).passwordHash;
+  const userUpdate: Record<string, unknown> = {};
+
+  if (needsPassword) {
+    if (!password || password.length < 8) throw new AppError("password_required", 400);
+    userUpdate.passwordHash = await bcrypt.hash(password, 12);
   }
-  const user: any = { ...(userDoc as any), role: "TENANT" };
+
+  // Accepting an invite grants tenant access and completes activation.
+  if ((userDoc as any).role !== "TENANT") userUpdate.role = "TENANT";
+  if ((userDoc as any).status !== "ACTIVE") userUpdate.status = "ACTIVE";
+
+  if (Object.keys(userUpdate).length > 0) {
+    await User.findByIdAndUpdate((userDoc as any)._id, { $set: userUpdate });
+  }
+  const user: any = { ...(userDoc as any), ...userUpdate, role: "TENANT", status: "ACTIVE" };
 
   await TenantInviteModel.findByIdAndUpdate(invite._id, {
     $set: { status: "ACCEPTED", acceptedAt: new Date(), otpHash: null },
@@ -545,6 +501,9 @@ export async function resendInvite(
     $set: { expiresAt: newExpiry, status: "SENT" },
   });
 
+  // Invites created before the user existed would otherwise fail at verify-otp.
+  await ensureTenantUserForInvite(invite.tenantEmail);
+
   const [propertyDoc, unitDoc] = await Promise.all([
     PropertyModel.findById(invite.propertyId).select("name").lean(),
     UnitModel.findById(invite.unitId).select("unitNumber label").lean(),
@@ -552,8 +511,7 @@ export async function resendInvite(
 
   const propertyName = (propertyDoc as { name?: string } | null)?.name ?? "your property";
   const unitNumber = formatUnitLabelForEmail(unitDoc as { unitNumber?: unknown; label?: unknown } | null);
-  const signInUrl = getTenantInviteBaseUrl();
-  const acceptUrl = `${signInUrl}/accept-invite?token=${invite.inviteToken}`;
+  const acceptUrl = buildAcceptInviteUrl(invite.inviteToken);
 
   const leaseSummary =
     invite.leaseStartDate || invite.leaseEndDate
@@ -586,9 +544,8 @@ export async function resendInvite(
         unitNumber,
         leaseSummary,
         expiresDisplay,
-        signInUrl: acceptUrl,
+        acceptUrl,
         tenantEmail: invite.tenantEmail,
-        temporaryPassword: undefined,
       }),
     });
   } else {
