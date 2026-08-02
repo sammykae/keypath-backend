@@ -1,0 +1,27 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "NodeNext",
+        "typeRoots": ["./node_modules/@types", "./src/types"],
+        "moduleResolution": "NodeNext",
+        "types": ["node"],
+        "sourceMap": true,
+        "lib": ["ES6", "DOM"],
+        "strict": true,
+        "noImplicitAny": true,
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "allowJs": true,
+        "rootDir": ".",
+        "outDir": "dist",
+        "skipLibCheck": true
+    },
+    "include": ["src/**/*", "scripts/**/*"],
+    "exclude": ["src/**/*.test.ts", "src/**/tests/**/*"],
+    "ts-node": {
+        "esm": false,
+        "compilerOptions": {
+            "module": "commonjs"
+        }
+    }
+}

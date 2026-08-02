@@ -1,0 +1,573 @@
+==============================================================
+  KEYPATH — FULL ONBOARDING API GUIDE
+  Base URL: http://localhost:3001
+  All requests: Content-Type: application/json
+  Auth header:  Authorization: Bearer <token>
+==============================================================
+
+
+================================================================
+  STEP 0 — SHARED AUTH ENDPOINTS (all roles start here)
+================================================================
+
+-- LOGIN --
+POST /api/auth/login
+Body:
+{
+  "email": "user@example.com",
+  "password": "YourPassword123!"
+}
+Response gives: token, user.role, dashboardRoute
+
+-- GET PROFILE --
+GET /api/auth/me/profile
+Header: Authorization: Bearer <token>
+Returns: profile + role-specific sub-doc (tenantProfile / landlordProfile / communityProfile / investorProfile)
+
+-- VERIFY EMAIL (after registration) --
+GET /api/auth/verify-email?token=<token_from_email>
+
+-- RESEND VERIFICATION EMAIL --
+POST /api/auth/verify-email/resend
+Header: Authorization: Bearer <token>
+
+
+================================================================
+  FLOW 1 — COMMUNITY STAKEHOLDER (self-serve, no invite needed)
+  Roles: COMMUNITY, COMMUNITY_STAKEHOLDER
+================================================================
+
+STEP 1 — Create account
+POST /api/auth/register
+Body:
+{
+  "email": "sarah@kumasi.gov.gh",
+  "password": "SecurePass1!",
+  "role": "COMMUNITY_STAKEHOLDER",
+  "firstName": "Sarah",
+  "lastName": "Osei"
+}
+Response: { token, user, dashboardRoute: "/community", nextStep: "verify_email" }
+→ Save the token for all following requests.
+
+--------------------------------------------------------------
+STEP 2 — Set up org profile
+POST /api/auth/me/setup
+Header: Authorization: Bearer <token>
+Body:
+{
+  "firstName": "Sarah",
+  "lastName": "Osei",
+  "orgName": "City of Kumasi",
+  "orgType": "municipality",
+  "phone": "+233501234567",
+  "website": "https://kumasi.gov.gh",
+  "country": "Ghana"
+}
+orgType options: "municipality" | "school" | "nonprofit" | "other"
+
+--------------------------------------------------------------
+STEP 3 — Save organization information (onboarding wizard step)
+POST /api/onboarding/community/organization-information
+Header: Authorization: Bearer <token>
+Body:
+{
+  "organizationName": "City of Kumasi",
+  "department": "Housing & Urban Development",
+  "jurisdiction": "Kumasi, Ashanti Region",
+  "role": "Community Liaison"
+}
+
+--------------------------------------------------------------
+STEP 4 — Save stakeholder type
+POST /api/onboarding/community/stakeholder-type
+Header: Authorization: Bearer <token>
+Body:
+{
+  "stakeholderType": "MUNICIPALITY"
+}
+stakeholderType options: MUNICIPALITY | SCHOOL | NON_PROFIT | OTHER
+
+--------------------------------------------------------------
+STEP 5 — Program association
+POST /api/onboarding/community/program-association
+Header: Authorization: Bearer <token>
+Body:
+{
+  "programIds": [],
+  "interestedInAllPrograms": true
+}
+
+--------------------------------------------------------------
+STEP 6 — Data visibility & privacy
+POST /api/onboarding/community/data-visibility-privacy
+Header: Authorization: Bearer <token>
+Body:
+{
+  "acknowledgedDataLimitations": true,
+  "acknowledgedAnonymization": true
+}
+
+--------------------------------------------------------------
+STEP 7 — Impact goals
+POST /api/onboarding/community/impact-goals
+Header: Authorization: Bearer <token>
+Body:
+{
+  "impactGoals": [
+    "HOUSING_STABILITY_AND_TENANT_RETENTION",
+    "LOCAL_JOB_CREATION"
+  ],
+  "acknowledgedOversightAccessAndExitRules": true
+}
+Goal options:
+  HOUSING_STABILITY_AND_TENANT_RETENTION
+  LOCAL_JOB_CREATION
+  LOCAL_VENDOR_AND_SMALL_BUSINESS_USAGE
+  ESG_AND_COMMUNITY_COMMITMENTS
+
+--------------------------------------------------------------
+STEP 8 — Review & activate
+POST /api/onboarding/community/review-activate
+Header: Authorization: Bearer <token>
+Body:
+{
+  "confirmedAccuracy": true,
+  "agreedToTerms": true
+}
+
+--------------------------------------------------------------
+DONE → Redirect to /dashboard/community
+
+
+================================================================
+  FLOW 2 — INVESTOR (self-serve, no invite needed)
+================================================================
+
+STEP 1 — Create account
+POST /api/auth/register
+Body:
+{
+  "email": "david@ventures.com",
+  "password": "SecurePass1!",
+  "role": "INVESTOR",
+  "firstName": "David",
+  "lastName": "Acheampong"
+}
+Response: { token, user, dashboardRoute: "/investors", nextStep: "verify_email" }
+→ Save the token.
+
+--------------------------------------------------------------
+STEP 2 — Set up investor profile
+POST /api/auth/me/setup
+Header: Authorization: Bearer <token>
+Body:
+{
+  "firstName": "David",
+  "lastName": "Acheampong",
+  "phone": "+233244001122",
+  "nationality": "Ghanaian",
+  "investmentRange": "50k-250k",
+  "accreditedInvestor": true
+}
+investmentRange options: "10k-50k" | "50k-250k" | "250k-1m" | "1m+"
+
+--------------------------------------------------------------
+STEP 3 — Status acknowledgment
+POST /api/onboarding/investor/status-acknowledgment
+Header: Authorization: Bearer <token>
+Body:
+{
+  "isAccreditedInvestor": true,
+  "acknowledgedRegulatoryStatus": true
+}
+
+--------------------------------------------------------------
+STEP 4 — Investment preferences
+POST /api/onboarding/investor/investment-preferences
+Header: Authorization: Bearer <token>
+Body:
+{
+  "preferredPropertyTypes": ["RESIDENTIAL", "MIXED_USE"],
+  "targetReturnRange": "8-12%",
+  "investmentHorizon": "5-10_YEARS",
+  "geographicPreferences": ["Ghana", "Nigeria"]
+}
+
+--------------------------------------------------------------
+STEP 5 — Legal acknowledgments
+POST /api/onboarding/investor/legal-acknowledgments
+Header: Authorization: Bearer <token>
+Body:
+{
+  "acknowledgedRisks": true,
+  "acknowledgedLiquidity": true,
+  "agreedToTerms": true
+}
+
+--------------------------------------------------------------
+STEP 6 — All set
+POST /api/onboarding/investor/all-set
+Header: Authorization: Bearer <token>
+Body:
+{
+  "confirmedReadiness": true
+}
+
+--------------------------------------------------------------
+DONE → Redirect to /dashboard/investor
+
+
+================================================================
+  FLOW 3 — TENANT (requires invite from landlord)
+================================================================
+
+STEP 1 — Tenant submits interest (optional, admin-initiated flow)
+POST /api/onboarding/tenant/interest
+Body:
+{
+  "firstName": "Kwame",
+  "lastName": "Mensah",
+  "email": "kwame@example.com",
+  "phone": "+233201234567",
+  "message": "Looking for affordable housing"
+}
+
+--------------------------------------------------------------
+STEP 2 — Landlord/Admin generates invite link (admin-only)
+POST /api/onboarding/admin/tenant/:interestId/generate-link
+Header: Authorization: Bearer <admin_token>
+→ Returns an onboardingToken invite link sent to tenant email
+
+  — OR — (landlord sends directly)
+
+POST /api/invites
+Header: Authorization: Bearer <landlord_token>
+Body:
+{
+  "tenantEmail": "kwame@example.com",
+  "propertyId": "<propertyId>",
+  "unitId": "<unitId>",
+  "participationModel": "BOTH",
+  "inviteMethod": "LINK",
+  "deliveryMethod": "KEYPATH_EMAIL",
+  "leaseStartDate": "2025-08-01T00:00:00.000Z",
+  "leaseEndDate": "2026-07-31T00:00:00.000Z"
+}
+
+--------------------------------------------------------------
+STEP 3 — Tenant previews invite (from email link)
+GET /api/invites/accept?token=<invite_token>
+Response: { summary: { email, propertyName, unit, leaseStart, leaseEnd } }
+
+--------------------------------------------------------------
+STEP 4 — Tenant confirms (accepts magic link → gets JWT)
+POST /api/invites/accept
+Body:
+{
+  "token": "<invite_token>"
+}
+Response: { authToken, dashboardRoute: "/tenant", user }
+→ Save authToken.
+
+  — IF LINK EXPIRED — request new link:
+POST /api/invites/resend
+Body: { "email": "kwame@example.com" }
+
+--------------------------------------------------------------
+STEP 5 — Tenant creates account via onboarding token (alternative path)
+POST /api/onboarding/tenant/create-account
+Body:
+{
+  "onboardingToken": "<token_from_invite_email>",
+  "email": "kwame@example.com",
+  "password": "SecurePass1!",
+  "firstName": "Kwame",
+  "lastName": "Mensah"
+}
+Response: { token }
+
+--------------------------------------------------------------
+STEP 6 — Set up tenant profile
+POST /api/auth/me/setup
+Header: Authorization: Bearer <token>
+Body:
+{
+  "firstName": "Kwame",
+  "lastName": "Mensah",
+  "phone": "+233201234567",
+  "currentAddress": "12 Ring Road, Accra",
+  "emergencyContactName": "Abena Mensah",
+  "emergencyContactPhone": "+233244567890"
+}
+
+--------------------------------------------------------------
+STEP 7 — Identity verification
+POST /api/onboarding/tenant/identity-verification
+Header: Authorization: Bearer <token>
+Body:
+{
+  "idType": "NATIONAL_ID",
+  "idNumber": "GHA-123456789",
+  "verificationMethod": "MANUAL"
+}
+
+--------------------------------------------------------------
+STEP 8 — Lease association
+POST /api/onboarding/tenant/lease-association
+Header: Authorization: Bearer <token>
+Body:
+{
+  "propertyId": "<propertyId>",
+  "unitId": "<unitId>",
+  "leaseStartDate": "2025-08-01",
+  "confirmedLeaseDetails": true
+}
+
+--------------------------------------------------------------
+STEP 9 — Program explanation acknowledgment
+POST /api/onboarding/tenant/program-explanation
+Header: Authorization: Bearer <token>
+Body:
+{
+  "acknowledgedProgramExplanation": true
+}
+
+--------------------------------------------------------------
+STEP 10 — Participation status
+POST /api/onboarding/tenant/participation-status
+Header: Authorization: Bearer <token>
+Body:
+{
+  "participationChoice": "OPT_IN",
+  "acknowledgedTerms": true
+}
+
+--------------------------------------------------------------
+STEP 11 — Dashboard walkthrough complete
+POST /api/onboarding/tenant/dashboard-walkthrough
+Header: Authorization: Bearer <token>
+Body:
+{
+  "completedWalkthrough": true
+}
+
+--------------------------------------------------------------
+DONE → Redirect to /dashboard/tenant
+
+
+================================================================
+  FLOW 4 — LANDLORD (requires admin invite)
+================================================================
+
+STEP 1 — Landlord submits interest
+POST /api/onboarding/landlord/interest
+Body:
+{
+  "firstName": "Emmanuel",
+  "lastName": "Boateng",
+  "email": "emmanuel@properties.gh",
+  "phone": "+233302001234",
+  "organizationName": "Boateng Properties Ltd",
+  "numberOfProperties": 5,
+  "message": "Interested in the TEPA program"
+}
+
+--------------------------------------------------------------
+STEP 2 — Admin generates invite link
+POST /api/onboarding/admin/landlord/:interestId/generate-link
+Header: Authorization: Bearer <admin_token>
+→ Returns onboardingToken, sent to landlord email
+
+--------------------------------------------------------------
+STEP 3 — Landlord resolves invite (gets prefill data)
+GET /api/onboarding/landlord/invite/resolve?token=<onboardingToken>
+Response: { prefill: { firstName, lastName, email, organizationName, ... } }
+
+--------------------------------------------------------------
+STEP 4 — Landlord creates account
+POST /api/onboarding/landlord/create-account
+Body:
+{
+  "onboardingToken": "<token>",
+  "email": "emmanuel@properties.gh",
+  "password": "SecurePass1!",
+  "firstName": "Emmanuel",
+  "lastName": "Boateng"
+}
+Response: { token }
+→ Save token.
+
+--------------------------------------------------------------
+STEP 5 — Set up landlord profile
+POST /api/auth/me/setup
+Header: Authorization: Bearer <token>
+Body:
+{
+  "firstName": "Emmanuel",
+  "lastName": "Boateng",
+  "phone": "+233302001234",
+  "companyName": "Boateng Properties Ltd",
+  "businessRegistrationNumber": "GH-BRN-2024-001",
+  "address": "14 Independence Avenue, Accra",
+  "country": "Ghana"
+}
+
+--------------------------------------------------------------
+STEP 6 — Property details
+POST /api/onboarding/landlord/property-details
+Header: Authorization: Bearer <token>
+Body:
+{
+  "propertyName": "Boateng Court",
+  "address": "14 Independence Avenue, Accra",
+  "propertyType": "RESIDENTIAL",
+  "numberOfUnits": 12,
+  "yearBuilt": 2018
+}
+
+--------------------------------------------------------------
+STEP 7 — Program selection
+POST /api/onboarding/landlord/program-selection
+Header: Authorization: Bearer <token>
+Body:
+{
+  "participationModel": "BOTH",
+  "selectedPrograms": ["TEPA", "RPA"]
+}
+participationModel options: "RPA_ONLY" | "TEPA_ONLY" | "BOTH"
+
+--------------------------------------------------------------
+STEP 8 — Compliance documents upload
+POST /api/onboarding/landlord/compliance-documents
+Header: Authorization: Bearer <token>
+Body: multipart/form-data
+  file: <document file>
+  documentType: "TITLE_DEED" | "INSURANCE" | "PERMIT"
+
+--------------------------------------------------------------
+STEP 9 — Program economics & rules
+POST /api/onboarding/landlord/program-economics-rules
+Header: Authorization: Bearer <token>
+Body:
+{
+  "creditAccrualRate": 5,
+  "maxOwnershipPercentage": 10,
+  "vestingPeriodMonths": 24,
+  "buybackEnabled": true,
+  "buybackPricePerCredit": 100
+}
+
+--------------------------------------------------------------
+STEP 10 — Framework acknowledgment
+POST /api/onboarding/landlord/framework-acknowledgment
+Header: Authorization: Bearer <token>
+Body:
+{
+  "acknowledgedFramework": true,
+  "acknowledgedTepaTerms": true
+}
+
+--------------------------------------------------------------
+STEP 11 — Compliance acknowledgments
+POST /api/onboarding/landlord/compliance-acknowledgments
+Header: Authorization: Bearer <token>
+Body:
+{
+  "acknowledgedFairHousing": true,
+  "acknowledgedLocalRegulations": true,
+  "acknowledgedDataPrivacy": true
+}
+
+--------------------------------------------------------------
+STEP 12 — Review & activate
+POST /api/onboarding/landlord/review-activate
+Header: Authorization: Bearer <token>
+Body:
+{
+  "confirmedAccuracy": true,
+  "agreedToTerms": true
+}
+
+--------------------------------------------------------------
+STEP 13 — Activate program
+POST /api/onboarding/landlord/activate-program
+Header: Authorization: Bearer <token>
+Body:
+{
+  "activateNow": true
+}
+
+--------------------------------------------------------------
+DONE → Redirect to /dashboard/landlord
+
+
+================================================================
+  SEARCH ENDPOINTS (BE-500 to BE-505) — any role after login
+================================================================
+
+-- Search (BE-500) --
+GET /api/search?q=housing
+Header: Authorization: Bearer <token>
+Response: { results: [...], logId: "..." }
+
+-- Command Palette / Actions (BE-503) --
+GET /api/search/actions
+Header: Authorization: Bearer <token>
+Response: { actions: [...] } — filtered to your role
+
+-- Track a click (BE-504) --
+POST /api/search/click
+Header: Authorization: Bearer <token>
+Body:
+{
+  "logId": "<logId from search response>",
+  "resultType": "action",
+  "label": "View Reports",
+  "route": "/reports",
+  "rank": 0
+}
+
+-- Search index status (BE-501) --
+GET /api/admin/search-index/status
+Header: Authorization: Bearer <admin_token>
+
+-- Rebuild search index (BE-501 + BE-502) --
+POST /api/admin/search-index/rebuild
+Header: Authorization: Bearer <admin_token>
+
+
+================================================================
+  QUICK ROLE TEST TOKENS (register these for the demo)
+================================================================
+
+Community:
+  POST /api/auth/register
+  { "email": "demo_community@keypath.ai", "password": "Demo1234!", "role": "COMMUNITY_STAKEHOLDER", "firstName": "Sarah", "lastName": "Osei" }
+
+Investor:
+  POST /api/auth/register
+  { "email": "demo_investor@keypath.ai", "password": "Demo1234!", "role": "INVESTOR", "firstName": "David", "lastName": "Acheampong" }
+
+Admin (login only — no self-register):
+  POST /api/auth/login
+  { "email": "admin@keypath.ai", "password": "KeyPath@Admin2025!" }
+
+
+================================================================
+  ERROR CODES TO KNOW
+================================================================
+
+INVITE_EXPIRED         → token is past its expiry date (resendInviteCta: true)
+INVITE_INVALID         → token does not exist or was cancelled
+INVITE_ALREADY_ACCEPTED → tenant already accepted this invite
+VERIFICATION_FAILED    → email verify token is bad or expired
+EMAIL_EXISTS           → account already registered with this email
+UNAUTHORIZED           → missing or invalid Bearer token
+ROLE_NOT_PERMITTED     → role does not have access to this endpoint
+MISSING_ORG            → landlord JWT has no orgId (onboarding incomplete)
+
+
+================================================================
+  END OF GUIDE
+================================================================

@@ -1,0 +1,20 @@
+{
+    "name": "keypath-onchain",
+    "version": "0.1.0",
+    "description": "KeyPath tokenization smart contracts - isolated from production server",
+    "scripts": {
+        "compile": "hardhat compile",
+        "test": "hardhat test",
+        "clean": "hardhat clean"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+        "@types/chai": "^4.3.11",
+        "@types/mocha": "^10.0.6",
+        "hardhat": "^2.22.0",
+        "typescript": "^5.3.3"
+    },
+    "dependencies": {
+        "@openzeppelin/contracts": "^5.0.2"
+    }
+}

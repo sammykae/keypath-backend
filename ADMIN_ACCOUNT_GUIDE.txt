@@ -1,0 +1,196 @@
+==============================================================
+  KEYPATH — ADMIN ACCOUNT CREATION GUIDE
+  Base URL: http://localhost:3001
+  All requests: Content-Type: application/json
+==============================================================
+
+
+================================================================
+  ENDPOINT
+================================================================
+
+POST /api/auth/admin/create
+
+
+================================================================
+  HOW IT WORKS
+================================================================
+
+The endpoint has two modes:
+
+  BOOTSTRAP MODE
+  → Used when there are zero admin accounts in the database.
+  → No JWT (Authorization header) is needed.
+  → Only the x-admin-secret header + request body required.
+  → Use this to create your very first admin account.
+
+  SUBSEQUENT MODE
+  → Used after at least one admin already exists.
+  → Requires a valid admin JWT AND the x-admin-secret header.
+  → Only an existing admin can create more admins.
+
+
+================================================================
+  REQUIRED HEADER (both modes)
+================================================================
+
+x-admin-secret: KeyPath@AdminSecret2025!
+
+This value must match the ADMIN_CREATION_SECRET variable in the
+server's .env file. If the secret is wrong or missing, the
+request is rejected with 403.
+
+
+================================================================
+  FLOW 1 — BOOTSTRAP (first admin, no accounts exist yet)
+================================================================
+
+Request:
+
+POST http://localhost:3001/api/auth/admin/create
+Content-Type: application/json
+x-admin-secret: KeyPath@AdminSecret2025!
+
+Body:
+{
+  "email": "admin@keypath.ai",
+  "password": "KeyPath@Admin2025!",
+  "firstName": "Enger",
+  "lastName": "Blessing"
+}
+
+Response (201):
+{
+  "success": true,
+  "data": {
+    "token": "eyJ...",
+    "user": {
+      "id": "abc123",
+      "email": "admin@keypath.ai",
+      "role": "ADMIN",
+      "status": "ACTIVE",
+      "emailVerified": true
+    },
+    "dashboardRoute": "/admin"
+  }
+}
+
+→ Save the token. You are now logged in as admin.
+→ No email verification needed — admin accounts are pre-verified.
+
+
+================================================================
+  FLOW 2 — ADD ANOTHER ADMIN (admin already exists)
+================================================================
+
+Request:
+
+POST http://localhost:3001/api/auth/admin/create
+Content-Type: application/json
+Authorization: Bearer <existing_admin_token>
+x-admin-secret: KeyPath@AdminSecret2025!
+
+Body:
+{
+  "email": "admin2@keypath.ai",
+  "password": "AnotherAdmin2025!",
+  "firstName": "John",
+  "lastName": "Doe"
+}
+
+Response (201): same shape as above.
+
+
+================================================================
+  HOW TO LOGIN AFTER CREATION
+================================================================
+
+POST http://localhost:3001/api/auth/login
+Content-Type: application/json
+
+Body:
+{
+  "email": "admin@keypath.ai",
+  "password": "KeyPath@Admin2025!"
+}
+
+Response gives: token, user.role = "ADMIN", dashboardRoute = "/admin"
+→ Use the token in all subsequent admin requests:
+   Authorization: Bearer <token>
+
+
+================================================================
+  WHAT AN ADMIN CAN DO
+================================================================
+
+  PATCH /api/auth/admin/users/:userId/suspend
+  → Suspend any user account
+
+  PATCH /api/auth/admin/users/:userId/reactivate
+  → Reactivate a suspended user
+
+  GET  /api/admin/search-index/status
+  → Check search index health
+
+  POST /api/admin/search-index/rebuild
+  → Rebuild the full search index
+
+  POST /api/auth/admin/create  (with admin JWT + secret)
+  → Create additional admin accounts
+
+
+================================================================
+  ERROR RESPONSES
+================================================================
+
+503 ADMIN_CREATION_NOT_CONFIGURED
+  → ADMIN_CREATION_SECRET is not set in the server .env file.
+     Ask the server admin to add it.
+
+403 INVALID_ADMIN_SECRET
+  → x-admin-secret header is missing or does not match the
+     server's ADMIN_CREATION_SECRET value.
+
+403 ADMIN_AUTH_REQUIRED
+  → An admin already exists. You must provide a valid admin
+     JWT in the Authorization header to create another one.
+
+409 EMAIL_EXISTS
+  → An account with this email is already registered.
+
+400 VALIDATION_ERROR
+  → email or password field is missing from the request body.
+
+400 WEAK_PASSWORD
+  → Password must be at least 8 characters long.
+
+
+================================================================
+  SWAGGER
+================================================================
+
+Full interactive docs available at:
+  http://localhost:3001/api-docs
+
+Find the endpoint under:
+  Auth → POST /api/auth/admin/create
+
+Use the Authorize 🔒 button in Swagger to paste your admin
+token once, then all secured endpoints will use it automatically.
+
+
+================================================================
+  ENV VARIABLE REFERENCE
+================================================================
+
+Key in .env:           ADMIN_CREATION_SECRET
+Current value:         KeyPath@AdminSecret2025!
+Where to change it:    keypath-backend/.env
+
+Change this to a strong, private value before any shared or
+production deployment.
+
+
+================================================================
+  END OF GUIDE
+================================================================

@@ -1,0 +1,15 @@
+# Hardhat files
+cache/
+artifacts/
+typechain-types/
+
+# Foundry files
+out/
+
+# Node
+node_modules/
+
+# Environment variables
+.env
+.env.local
+
