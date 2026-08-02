@@ -11,8 +11,7 @@ import {
 } from '../models/landlord-interest.model';
 import { sendLandlordOnboardingInviteEmail } from './landlord-invite-notifier.service';
 
-const DEFAULT_LANDLORD_ONBOARDING_URL =
-  'https://keypath.ai/onboarding?type=landlord';
+const LANDLORD_ONBOARDING_PATH = '/onboarding?type=landlord';
 const DEFAULT_INVITE_EXPIRY_HOURS = 24 * 7;
 
 interface CreateLandlordInterestInput {
@@ -49,11 +48,15 @@ function getInviteSigningSecret(): string {
   return secret;
 }
 
+function getFrontendUrl(): string {
+  return (process.env.FRONTEND_URL?.trim() || 'https://keypath.ai').replace(/\/+$/, '');
+}
+
 function buildFrontendOnboardingLink(token: string, customUrl?: string): string {
   const baseUrl =
     customUrl?.trim() ||
     process.env.LANDLORD_ONBOARDING_FRONTEND_URL?.trim() ||
-    DEFAULT_LANDLORD_ONBOARDING_URL;
+    `${getFrontendUrl()}${LANDLORD_ONBOARDING_PATH}`;
 
   const separator = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${separator}inviteToken=${encodeURIComponent(token)}`;

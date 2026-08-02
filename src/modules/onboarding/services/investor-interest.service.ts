@@ -11,8 +11,7 @@ import {
 } from '../models/investor-interest.model';
 import { sendInvestorOnboardingInviteEmail } from './investor-invite-notifier.service';
 
-const DEFAULT_INVESTOR_ONBOARDING_URL =
-  'https://keypath.ai/onboarding?type=investor';
+const INVESTOR_ONBOARDING_PATH = '/onboarding?type=investor';
 const DEFAULT_INVITE_EXPIRY_HOURS = 24 * 7;
 const CURRENT_STEP = 'create_account';
 const NEXT_STEP = 'investor_status_acknowledgment';
@@ -49,11 +48,15 @@ function getInviteSigningSecret(): string {
   return secret;
 }
 
+function getFrontendUrl(): string {
+  return (process.env.FRONTEND_URL?.trim() || 'https://keypath.ai').replace(/\/+$/, '');
+}
+
 function buildFrontendOnboardingLink(token: string, customUrl?: string): string {
   const baseUrl =
     customUrl?.trim() ||
     process.env.INVESTOR_ONBOARDING_FRONTEND_URL?.trim() ||
-    DEFAULT_INVESTOR_ONBOARDING_URL;
+    `${getFrontendUrl()}${INVESTOR_ONBOARDING_PATH}`;
 
   const separator = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${separator}inviteToken=${encodeURIComponent(token)}`;

@@ -11,8 +11,7 @@ import {
 } from '../models/tenant-interest.model';
 import { sendTenantOnboardingInviteEmail } from './tenant-invite-notifier.service';
 
-const DEFAULT_TENANT_ONBOARDING_URL =
-  'https://keypath.ai/onboarding';
+const TENANT_ONBOARDING_PATH = '/onboarding';
 const DEFAULT_INVITE_EXPIRY_HOURS = 24 * 7;
 const CURRENT_STEP = 'create_account';
 const NEXT_STEP = 'identity_verification';
@@ -54,11 +53,15 @@ function getInviteSigningSecret(): string {
   return secret;
 }
 
+function getFrontendUrl(): string {
+  return (process.env.FRONTEND_URL?.trim() || 'https://keypath.ai').replace(/\/+$/, '');
+}
+
 function buildFrontendOnboardingLink(token: string, customUrl?: string): string {
   const baseUrl =
     customUrl?.trim() ||
     process.env.TENANT_ONBOARDING_FRONTEND_URL?.trim() ||
-    DEFAULT_TENANT_ONBOARDING_URL;
+    `${getFrontendUrl()}${TENANT_ONBOARDING_PATH}`;
 
   const separator = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${separator}inviteToken=${encodeURIComponent(token)}`;
